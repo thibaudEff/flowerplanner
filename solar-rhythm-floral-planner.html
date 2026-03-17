@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solar Rhythm Floral Planner — Terre Ugo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useCallback, useMemo, useEffect, useRef } = React;
+
+    /* ─────────────────── EXTRACTED DATA ─────────────────── */
+
+    const PALETTE = [
+      { id:"solar-yellow", name:"Solar Yellow", hex:"#F5C451", family:"yellow" },
+      { id:"ivory-white", name:"Ivory White", hex:"#FAF5ED", family:"white" },
+      { id:"lavender-mist", name:"Lavender Mist", hex:"#B0A0C8", family:"lavender" },
+      { id:"anthurium-blush", name:"Anthurium Blush", hex:"#F2C4B6", family:"warm" },
+      { id:"warm-coral", name:"Warm Coral", hex:"#E8825A", family:"warm" },
+      { id:"clematis-violet", name:"Clematis Violet", hex:"#7B68AE", family:"lavender" },
+      { id:"sage-green", name:"Sage Leaf", hex:"#A8B89C", family:"green" },
+      { id:"sunset-orange", name:"Sunset Orange", hex:"#E07830", family:"warm" },
+      { id:"passion-purple", name:"Passion Fruit", hex:"#6B3A6B", family:"lavender" },
+      { id:"stone-beige", name:"Stone Beige", hex:"#D4C8B8", family:"neutral" },
+      { id:"craspedia-gold", name:"Craspedia Gold", hex:"#D4A017", family:"yellow" },
+      { id:"delph-blue", name:"Delphinium Sky", hex:"#8BADD4", family:"blue" },
+    ];
+
+    // Pexels photo IDs for each flower — loaded at runtime in user's browser
+    const FLOWER_PHOTO_IDS = {
+      allium: 20141099, achillea: 35164371, delphinium: 34437646,
+      anthurium: 13964909, peony: 14415002, dahlia: 5811883,
+      ranunculus: 8483711, clematis: 117689, calla: 33935829,
+      craspedia: 10054154, orchid: 7625674, pompom: 32581600,
+    };
+
+    // Global image cache to avoid re-fetching
+    const imageCache = {};
+
+    function usePexelsImage(flowerId) {
+      const [src, setSrc] = useState(imageCache[flowerId] || null);
+      const [failed, setFailed] = useState(false);
+      const attempted = useRef(false);
+
+      useEffect(() => {
+        if (src || attempted.current || failed) return;
+        attempted.current = true;
+        const photoId = FLOWER_PHOTO_IDS[flowerId];
+        if (!photoId) { setFailed(true); return; }
+        const url = `https://images.pexels.com/photos/${photoId}/pexels-photo-${photoId}.jpeg?auto=compress&cs=tinysrgb&w=280&h=280&fit=crop`;
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            const c = document.createElement("canvas");
+            c.width = 280; c.height = 280;
+            const ctx = c.getContext("2d");
+            ctx.drawImage(img, 0, 0, 280, 280);
+            const dataUrl = c.toDataURL("image/jpeg", 0.85);
+            imageCache[flowerId] = dataUrl;
+            setSrc(dataUrl);
+          } catch(e) {
+            // CORS blocked canvas — use the URL directly
+            imageCache[flowerId] = url;
+            setSrc(url);
+          }
+        };
+        img.onerror = () => {
+          // Try without query params
+          const fallbackUrl = `https://images.pexels.com/photos/${photoId}/pexels-photo-${photoId}.jpeg`;
+          const img2 = new Image();
+          img2.onload = () => { imageCache[flowerId] = fallbackUrl; setSrc(fallbackUrl); };
+          img2.onerror = () => setFailed(true);
+          img2.src = fallbackUrl;
+        };
+        img.src = url;
+      }, [flowerId, src, failed]);
+
+      return { src, failed };
+    }
+
+    const FLOWERS = [
+      { id:"allium", name:"Allium", season:"Peak Jun Provence", stem:"long-stem", type:"sculptural",
+        swatches:["#B0A0C8","#9370B8","#C8B8D8"], note:"Purple pompom balls, 60-90cm stems. Star of the aisle.",
+        tags:["ceremony","aisle"] },
+      { id:"achillea", name:"Achillée (Yarrow)", season:"Peak Jun", stem:"medium", type:"full-bloom",
+        swatches:["#F5C451","#D4A017","#E8D44D"], note:"Flat yellow clusters. Provence wildflower feel.",
+        tags:["aisle","tables"] },
+      { id:"delphinium", name:"Delphinium", season:"Jun — order early", stem:"long-stem", type:"sculptural",
+        swatches:["#FAF5ED","#8BADD4","#7B68AE"], note:"Tall spikes, white primary (Sophie's plan). Blue minority.",
+        tags:["ceremony","altar"] },
+      { id:"anthurium", name:"Anthurium", season:"Available year-round", stem:"long-stem", type:"tropical",
+        swatches:["#F2C4B6","#FAF5ED","#E88B7A"], note:"Sculptural heart shape. Pale pink/salmon/white. NO green.",
+        tags:["tables","bouquet"] },
+      { id:"peony", name:"Pivoine (Peony)", season:"Late May–mid Jun ⚠️", stem:"full-bloom", type:"full-bloom",
+        swatches:["#FAF5ED","#F8E8E0","#FCD5CE"], note:"White preferred. Season ends right at wedding — confirm with Sophie!",
+        tags:["bouquet","tables"] },
+      { id:"dahlia", name:"Dahlia", season:"Jun — early season", stem:"full-bloom", type:"full-bloom",
+        swatches:["#E8825A","#E07830","#D45A30"], note:"Orange/coral. Full & original shapes. Table star.",
+        tags:["tables"] },
+      { id:"ranunculus", name:"Renoncule (Ranunculus)", season:"Spring — late Jun risky ⚠️", stem:"full-bloom", type:"full-bloom",
+        swatches:["#F5C451","#F2C4B6","#E8825A"], note:"Layered petals. Yellow 'papillon' for tables. Confirm availability.",
+        tags:["tables"] },
+      { id:"clematis", name:"Clématite (Clematis)", season:"Jun ✓", stem:"trailing", type:"sculptural",
+        swatches:["#7B68AE","#9370B8","#B0A0C8"], note:"Blue Pirouette variety. Trailing accent for bouquet.",
+        tags:["bouquet","tables"] },
+      { id:"calla", name:"Arum (Calla Lily)", season:"Year-round", stem:"long-stem", type:"sculptural",
+        swatches:["#FAF5ED","#F0EDE5","#E8E0D0"], note:"Sleek white trumpets. Single-flower bouquet option.",
+        tags:["bouquet"] },
+      { id:"craspedia", name:"Craspedia (Billy Buttons)", season:"Year-round dried", stem:"long-stem", type:"sculptural",
+        swatches:["#D4A017","#F5C451","#C8A830"], note:"Perfect yellow balls on thin stems. Candlelit table magic.",
+        tags:["tables","boutonniere"] },
+      { id:"orchid", name:"Orchidée (Orchid)", season:"Year-round", stem:"long-stem", type:"tropical",
+        swatches:["#FAF5ED","#F5C451","#F2C4B6"], note:"White or yellow Oncidium. Subtle tropical touch.",
+        tags:["tables"] },
+      { id:"pompom", name:"Fleur Pompom (Scabiosa)", season:"Jun ✓", stem:"medium", type:"full-bloom",
+        swatches:["#FAF5ED","#E8D8C8","#F0E8D8"], note:"White/cream pincushion flowers. Textural filler.",
+        tags:["tables","boutonniere"] },
+    ];
+
+    const VIBE_KEYWORDS = [
+      "Solar Rhythm","Provençal Chic","French-Brazilian Fusion","Lavender Field Backdrop",
+      "Passion Fruit Accent","Clean Modern","Warm Not Pastel","Sculptural Stems",
+      "Minimal Foliage","No Boho","No Rococo","Terre Ugo Garden"
+    ];
+
+    const TABS = [
+      { id:"aisle", label:"Ceremony Aisle", icon:"🌾", desc:"Long-stem 'growing from earth' — Allium + Achillea + Delphinium blanc",
+        sophie:"6 compositions dispersées · 6×75€ = 450€", note:"Très belle allée, important pour Joana" },
+      { id:"altar", label:"Altar / Ground", icon:"⛪", desc:"Ground-based composition, NO arch (arche sans fleurissement)",
+        sophie:"Pas de fleurissement d'arche · 0€", note:"L'arche sera enlevée. Bancs disposés à 15h" },
+      { id:"tables", label:"Table Centerpieces", icon:"🕯️", desc:"12 compositions sur table de 30m — anthuriums, dahlias, passion fruit",
+        sophie:"15 compositions · 45€×12 = 540€", note:"Joana dépose une cagette de fruits de la passion" },
+      { id:"bouquet", label:"Bridal Bouquet", icon:"💐", desc:"Single flower type + ruban mousseline blanc — modern clean look",
+        sophie:"Bouquet 90€ + bouquet à jeter 30€ + 3 clématites 15€ = 135€", note:"Le même, sans feuillage, blanc en majorité, couleurs, clématites" },
+      { id:"boutonniere", label:"Boutonnière", icon:"🤵", desc:"Petrol-blue suit contrast — yellow totally (Sophie's note)",
+        sophie:"Boutonnière jaune · 10€", note:"Jaune totalement — petrol blue suit match" },
+      { id:"bar", label:"Bar / Repurposing", icon:"🍸", desc:"Evening bar area — repurpose ceremony flowers discreetly",
+        sophie:"Installation/désinstallation incluse · 300€", note:"" },
+    ];
+
+    const SOPHIE_QUOTE = {
+      bouquet: 90, bouquetJeter: 30, clematites: 15,
+      boutonniere: 10, aisle: 450, tables: 540,
+      installDesinstall: 300, welcomeBoard: 0,
+      total: 1435,
+      payment1: { amount: 717.5, due: "1er avril 2026" },
+      payment2: { amount: 717.5, due: "1er juin 2026" },
+    };
+
+    const PROPOSALS = [
+      {
+        id:"A", name:"Golden Allium Sunrise", accent:"#F5C451",
+        philosophy:"Yellow-forward. The aisle glows golden with allium + achillea catching the evening light. Tables echo with craspedia orbs among passion fruit. Bouquet = pure white calla lilies with trailing clematis — clean, modern, striking against Joana's dress.",
+        elements: {
+          aisle: { flowers:["Allium (lavender)","Achillée jaune","Delphinium blanc"], flowerIds:["allium","achillea","delphinium"], colors:["#B0A0C8","#F5C451","#FAF5ED"], qty:"6 compositions dispersées le long de l'allée" },
+          altar: { flowers:["Ground composition: Achillée basse + Allium en pots"], flowerIds:["achillea","allium"], colors:["#F5C451","#B0A0C8"], qty:"2 jardinières au sol, pas d'arche" },
+          tables: { flowers:["Anthurium blush","Craspedia","Dahlia orange","Clématite violette","+ 2-3 fruits de la passion ouverts"], flowerIds:["anthurium","craspedia","dahlia","clematis"], colors:["#F2C4B6","#D4A017","#E07830","#7B68AE","#6B3A6B"], qty:"12 compositions basses" },
+          bouquet: { flowers:["Arum (Calla Lily) blanc pur — single type"], flowerIds:["calla"], colors:["#FAF5ED"], qty:"1 bouquet + 1 à jeter + 3 clématites veille Puyricard" },
+          boutonniere: { flowers:["Craspedia jaune + brin d'achillée"], flowerIds:["craspedia","achillea"], colors:["#F5C451","#D4A017"], qty:"1 boutonnière" },
+          bar: { flowers:["Allium + achillée récupérés de l'allée (discret)"], flowerIds:["allium","achillea"], colors:["#B0A0C8","#F5C451"], qty:"Repurposing cérémonie" },
+        },
+        costVsSophie: "Aligné avec le devis Sophie (1435€). Craspedia séchée = économique."
+      },
+      {
+        id:"B", name:"Solar Peony Rhythm", accent:"#F2C4B6",
+        philosophy:"Peony-centered warmth. If peonies are still available late June (confirm with Sophie!), the bouquet becomes a cloud of white peonies. Tables mix salmon anthurium with yellow ranunculus and open passion fruit for the Brazilian touch.",
+        elements: {
+          aisle: { flowers:["Allium mauve","Achillée jaune","Delphinium blanc (minoritaire)"], flowerIds:["allium","achillea","delphinium"], colors:["#B0A0C8","#F5C451","#FAF5ED"], qty:"6 compositions dispersées" },
+          altar: { flowers:["Pivoines blanches en jardinières basses"], flowerIds:["peony"], colors:["#FAF5ED","#F8E8E0"], qty:"2 compositions au sol" },
+          tables: { flowers:["Anthurium saumoné","Ranuncule papillon jaune","Dahlia orange","Achillée jaune","+ fruits de la passion"], flowerIds:["anthurium","ranunculus","dahlia","achillea"], colors:["#F2C4B6","#F5C451","#E8825A","#F5C451","#6B3A6B"], qty:"12 compositions" },
+          bouquet: { flowers:["Pivoine blanche — single type + ruban soie"], flowerIds:["peony"], colors:["#FAF5ED","#F8E8E0"], qty:"1 bouquet + 1 à jeter + 3 clématites" },
+          boutonniere: { flowers:["Petite renoncule jaune + brin achillée"], flowerIds:["ranunculus","achillea"], colors:["#F5C451","#D4A017"], qty:"1 boutonnière" },
+          bar: { flowers:["Pivoines de l'autel + allium de l'allée"], flowerIds:["peony","allium"], colors:["#FAF5ED","#B0A0C8"], qty:"Repurposing" },
+        },
+        costVsSophie: "~1435€. ⚠️ Pivoines fin juin = risqué. Prévoir plan B (calla/anthurium blanc)."
+      },
+      {
+        id:"C", name:"White Orchid Passion", accent:"#7B68AE",
+        philosophy:"Tropical-minimal fusion. White orchids + anthurium as the clean modern base. Passion fruit and clematis violet bring the Brazilian soul. Most daring, most 'Solar Rhythm' of the three.",
+        elements: {
+          aisle: { flowers:["Allium violet","Achillée jaune","Delphinium blanc"], flowerIds:["allium","achillea","delphinium"], colors:["#B0A0C8","#F5C451","#FAF5ED"], qty:"6 compositions dispersées" },
+          altar: { flowers:["Orchidées blanches en potées + anthurium blanc"], flowerIds:["orchid","anthurium"], colors:["#FAF5ED","#F0EDE5"], qty:"2-3 compositions au sol" },
+          tables: { flowers:["Anthurium blush","Orchidée Oncidium jaune","Dahlia orange","Clématite violette","+ fruits de la passion"], flowerIds:["anthurium","orchid","dahlia","clematis"], colors:["#F2C4B6","#F5C451","#E07830","#7B68AE","#6B3A6B"], qty:"12 compositions" },
+          bouquet: { flowers:["Anthurium blanc pur — single type + ruban soie"], flowerIds:["anthurium"], colors:["#FAF5ED"], qty:"1 bouquet sculptural + 1 à jeter + 3 clématites" },
+          boutonniere: { flowers:["Mini orchidée Oncidium jaune"], flowerIds:["orchid"], colors:["#F5C451","#E8D44D"], qty:"1 boutonnière" },
+          bar: { flowers:["Orchidées autel + allium cérémonie"], flowerIds:["orchid","allium"], colors:["#FAF5ED","#B0A0C8"], qty:"Repurposing" },
+        },
+        costVsSophie: "~1435-1500€. Orchidées dispos toute l'année = safe. Le plus audacieux."
+      }
+    ];
+
+    /* ─────────────────── COMPONENTS ─────────────────── */
+
+    const FlowerImg = ({ flowerId, size = 40, className = "" }) => {
+      const { src, failed } = usePexelsImage(flowerId);
+      const flower = FLOWERS.find(f=>f.id===flowerId);
+      const colors = flower?.swatches || ["#D4C8B8","#E8E0D4"];
+      const radius = size > 36 ? 12 : 8;
+
+      if (!src || failed) {
+        // Beautiful gradient fallback with flower initial
+        return (
+          <div
+            title={flower?.name}
+            style={{
+              width:size, height:size, borderRadius:radius, flexShrink:0,
+              background: `linear-gradient(135deg, ${colors[0]}, ${colors[1] || colors[0]})`,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              color:"white", fontWeight:700, fontSize:size*0.35, textShadow:"0 1px 3px rgba(0,0,0,0.3)",
+              border:"2px solid rgba(255,255,255,0.5)", boxShadow:"0 2px 8px rgba(0,0,0,0.1)"
+            }}
+            className={className}
+          >
+            {flower?.name?.charAt(0) || "?"}
+          </div>
+        );
+      }
+
+      return (
+        <img
+          src={src}
+          alt={flower?.name || flowerId}
+          style={{ width:size, height:size, objectFit:"cover", borderRadius:radius, flexShrink:0 }}
+          className={`shadow-sm ${className}`}
+        />
+      );
+    };
+
+    const Swatch = ({ hex, size = 28, name, onClick, selected }) => (
+      <div
+        onClick={onClick}
+        title={name ? `${name} ${hex}` : hex}
+        style={{
+          width: size, height: size, borderRadius: size/2, backgroundColor: hex, cursor: onClick ? "pointer" : "default",
+          border: selected ? "3px solid #5A4A3A" : "2px solid rgba(0,0,0,0.1)",
+          display:"inline-block", margin: 2, transition:"transform 0.15s", flexShrink:0,
+        }}
+      />
+    );
+
+    const FlowerCard = ({ flower, onDrag, assigned }) => {
+      const handleDragStart = (e) => {
+        e.dataTransfer.setData("flower", flower.id);
+        e.dataTransfer.effectAllowed = "copy";
+      };
+      return (
+        <div
+          draggable
+          onDragStart={handleDragStart}
+          onClick={() => onDrag && onDrag(flower.id)}
+          className={`rounded-xl border-2 p-2.5 cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${assigned ? 'border-amber-400 bg-amber-50' : 'border-stone-200 bg-white'}`}
+        >
+          <div className="flex items-start gap-2.5">
+            <FlowerImg flowerId={flower.id} size={56}/>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-stone-800 text-sm leading-tight">{flower.name}</div>
+              <div className="text-xs text-stone-400 mt-0.5">{flower.season}</div>
+              <div className="flex gap-1 mt-1.5">
+                {flower.swatches.map((h,i)=><Swatch key={i} hex={h} size={16}/>)}
+              </div>
+              <div className="flex gap-1 mt-1.5 flex-wrap">
+                <span className="text-xs px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-500">{flower.stem}</span>
+                <span className="text-xs px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-500">{flower.type}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const PassionFruit = ({ size = 40 }) => (
+      <div style={{ width:size, height:size, position:"relative", display:"inline-flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{
+          width: size, height: size, borderRadius: "50%",
+          background: "radial-gradient(circle at 35% 35%, #8B5A3A, #6B3A6B)",
+          position: "relative", overflow:"hidden", border:"2px solid #5A3A2A"
+        }}>
+          <div style={{
+            position:"absolute", top:"15%", left:"15%", width:"70%", height:"70%",
+            borderRadius:"50%", background:"radial-gradient(circle, #F5C451 10%, #E8A020 50%, #D4A017 100%)"
+          }}>
+            {[...Array(6)].map((_,i) => (
+              <div key={i} style={{
+                position:"absolute", width:3, height:3, borderRadius:"50%", background:"#3A2A1A",
+                top: `${35 + 20*Math.sin(i*Math.PI/3)}%`, left: `${35 + 20*Math.cos(i*Math.PI/3)}%`
+              }}/>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+
+    const LavenderField = () => (
+      <div style={{
+        position:"absolute", bottom:0, left:0, right:0, height:"35%",
+        background:"linear-gradient(0deg, #8B7AAE 0%, #B0A0C8 30%, #C8B8D8 60%, transparent 100%)",
+        opacity:0.35, borderRadius:"0 0 12px 12px"
+      }}>
+        {[...Array(20)].map((_,i) => (
+          <div key={i} style={{
+            position:"absolute", bottom:`${10+Math.random()*60}%`, left:`${i*5+Math.random()*3}%`,
+            width:3, height:12+Math.random()*15, background:"#7B68AE", borderRadius:2, opacity:0.6,
+            transform:`rotate(${-5+Math.random()*10}deg)`
+          }}/>
+        ))}
+      </div>
+    );
+
+    const Preview = ({ tab, assignments, activeMix }) => {
+      const tabFlowers = assignments[tab.id] || [];
+      const tabColors = activeMix.length > 0 ? activeMix : PALETTE.slice(0,4).map(p=>p.hex);
+
+      const renderFlowers = () => {
+        if (tabFlowers.length === 0) return (
+          <div className="text-stone-400 text-sm italic text-center py-10">
+            Drag flowers here or click a flower card to assign
+          </div>
+        );
+        return (
+          <div className="py-4">
+            {/* Flower images row — large for composition clarity */}
+            <div className="flex flex-wrap gap-5 justify-center items-end mb-4">
+              {tabFlowers.map((fId,i) => {
+                const f = FLOWERS.find(fl => fl.id === fId);
+                return (
+                  <div key={`${fId}-${i}`} className="flex flex-col items-center gap-2">
+                    <FlowerImg flowerId={fId} size={260}/>
+                    <span className="text-sm text-stone-700 font-semibold">{f?.name?.split("(")[0].trim()}</span>
+                    <div className="flex gap-1">{f?.swatches.map((s,j)=>(<div key={j} style={{width:14,height:14,borderRadius:7,background:s,border:"1px solid rgba(0,0,0,0.1)"}}/>))}</div>
+                  </div>
+                );
+              })}
+              {tab.id === "tables" && (
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex gap-2 items-end">
+                    <PassionFruit size={45}/>
+                    <PassionFruit size={38}/>
+                    <PassionFruit size={32}/>
+                  </div>
+                  <span className="text-xs text-stone-600 font-semibold">Passion Fruit</span>
+                </div>
+              )}
+            </div>
+            {/* Color harmony bar */}
+            <div className="flex gap-0 h-4 rounded-full overflow-hidden mx-auto" style={{maxWidth:280}}>
+              {tabFlowers.map((fId,i) => {
+                const f = FLOWERS.find(fl => fl.id === fId);
+                return f?.swatches.map((s,j) => (
+                  <div key={`${fId}-${i}-${j}`} style={{background:s, flex:1}}/>
+                ));
+              })}
+            </div>
+          </div>
+        );
+      };
+
+      return (
+        <div className="relative rounded-2xl overflow-hidden" style={{
+          background: `linear-gradient(170deg, #FAF5ED 0%, #F0EBE0 40%, #E8E0D4 100%)`,
+          minHeight: 300, border:"2px solid #E8DDD0"
+        }}>
+          <LavenderField/>
+          <div className="relative z-10 p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-2xl">{tab.icon}</span>
+              <h3 className="font-bold text-stone-800">{tab.label}</h3>
+            </div>
+            <p className="text-xs text-stone-500 mb-2">{tab.desc}</p>
+
+            {tab.id === "bar" && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3 mb-3">
+                <span className="text-red-600 font-bold text-sm">⚠️ Guests see movement — show repurposing alternatives only. Never move ceremony pieces visibly.</span>
+              </div>
+            )}
+
+            {renderFlowers()}
+
+            <div className="flex gap-1 mt-2 flex-wrap">
+              {tabColors.slice(0,6).map((c,i) => <Swatch key={i} hex={c} size={22}/>)}
+            </div>
+
+            {tab.sophie && (
+              <div className="mt-3 text-xs bg-white/70 rounded-lg px-3 py-2 text-stone-600">
+                <span className="font-semibold">Sophie:</span> {tab.sophie}
+                {tab.note && <div className="text-stone-400 mt-1 italic">{tab.note}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const ProposalView = ({ proposal }) => (
+      <div className="bg-white rounded-2xl border-2 border-stone-200 overflow-hidden">
+        <div className="p-4" style={{background:`linear-gradient(135deg, ${proposal.accent}18, ${proposal.accent}08)`}}>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{background:proposal.accent}}>
+              {proposal.id}
+            </div>
+            <div>
+              <h3 className="font-bold text-stone-800 text-lg">{proposal.name}</h3>
+              <p className="text-xs text-stone-500">{proposal.philosophy}</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-4 space-y-3">
+          {Object.entries(proposal.elements).map(([key, el]) => {
+            const tab = TABS.find(t=>t.id===key);
+            return (
+              <div key={key} className="border border-stone-100 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span>{tab?.icon}</span>
+                  <span className="font-semibold text-stone-700 text-sm">{tab?.label}</span>
+                </div>
+                {/* Flower thumbnails row */}
+                <div className="flex gap-2 mb-2 flex-wrap items-center">
+                  {(el.flowerIds || []).map((fId,i) => (
+                    <FlowerImg key={`${fId}-${i}`} flowerId={fId} size={32}/>
+                  ))}
+                  {key === "tables" && <PassionFruit size={20}/>}
+                  <div className="flex gap-0.5 ml-auto">
+                    {el.colors.map((c,i) => <Swatch key={i} hex={c} size={16}/>)}
+                  </div>
+                </div>
+                <ul className="text-xs text-stone-600 space-y-0.5">
+                  {el.flowers.map((f,i) => <li key={i}>• {f}</li>)}
+                </ul>
+                <div className="text-xs text-stone-400 mt-1">{el.qty}</div>
+              </div>
+            );
+          })}
+          <div className="bg-amber-50 rounded-lg p-3 text-sm text-stone-700 border border-amber-200">
+            <strong>Coût estimé:</strong> {proposal.costVsSophie}
+          </div>
+        </div>
+      </div>
+    );
+
+    const ExportPanel = ({ proposal, onClose }) => {
+      const text = useMemo(() => {
+        if (!proposal) return "";
+        let lines = [];
+        lines.push("═══════════════════════════════════════");
+        lines.push(`SOLAR RHYTHM FLORAL PLANNER — ${proposal.name.toUpperCase()}`);
+        lines.push("Joana & Thibaud · 26 Juin 2026 · Terre Ugo");
+        lines.push("═══════════════════════════════════════\n");
+        lines.push(`Philosophie: ${proposal.philosophy}\n`);
+        Object.entries(proposal.elements).forEach(([key, el]) => {
+          const tab = TABS.find(t=>t.id===key);
+          lines.push(`───── ${tab?.icon} ${tab?.label?.toUpperCase()} ─────`);
+          lines.push(`Fleurs: ${el.flowers.join(" · ")}`);
+          lines.push(`Palette: ${el.colors.join(" ")}`);
+          lines.push(`Quantité: ${el.qty}`);
+          if (key === "tables") lines.push("+ 2-3 fruits de la passion ouverts par composition");
+          lines.push("");
+        });
+        lines.push("───── BUDGET (vs devis Sophie) ─────");
+        lines.push(`${proposal.costVsSophie}`);
+        lines.push(`\nTotal devis Sophie: ${SOPHIE_QUOTE.total}€`);
+        lines.push(`Acompte 50%: ${SOPHIE_QUOTE.payment1.amount}€ avant ${SOPHIE_QUOTE.payment1.due}`);
+        lines.push(`Solde 50%: ${SOPHIE_QUOTE.payment2.amount}€ avant ${SOPHIE_QUOTE.payment2.due}`);
+        lines.push("\n───── NOTE POUR SOPHIE ─────");
+        lines.push("Fleurissons vos émotions — Sophie");
+        lines.push("Photos d'inspiration jointes (dossier FLOWER/)");
+        lines.push("Thème: Solar Rhythm — lavande × fruit de la passion");
+        lines.push("Contraintes: PAS de roses, PAS de feuillage excessif, PAS boho/rococo");
+        return lines.join("\n");
+      }, [proposal]);
+
+      if (!proposal) return null;
+
+      return (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[80vh] overflow-auto p-6" onClick={e=>e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-stone-800">Export — {proposal.name}</h2>
+              <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-xl">✕</button>
+            </div>
+            <pre className="text-xs bg-stone-50 rounded-xl p-4 overflow-auto whitespace-pre-wrap font-mono text-stone-700" style={{maxHeight:400}}>
+              {text}
+            </pre>
+            <button
+              onClick={() => { navigator.clipboard?.copyText(text); }}
+              className="mt-4 w-full py-3 rounded-xl font-semibold text-white transition-all hover:opacity-90"
+              style={{background:"linear-gradient(135deg, #7B68AE, #B0A0C8)"}}
+            >
+              Copy to clipboard
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    /* ─────────────────── MAIN APP ─────────────────── */
+
+    function SolarRhythmFloralPlanner() {
+      const [activeTab, setActiveTab] = useState("aisle");
+      const [activeMix, setActiveMix] = useState([]);
+      const [assignments, setAssignments] = useState({
+        aisle:[], altar:[], tables:[], bouquet:[], boutonniere:[], bar:[]
+      });
+      const [showProposals, setShowProposals] = useState(false);
+      const [exportProposal, setExportProposal] = useState(null);
+      const [singleFlower, setSingleFlower] = useState(true);
+      const [monochrome, setMonochrome] = useState(false);
+      const [tropical, setTropical] = useState(false);
+      const [provencal, setProvencal] = useState(true);
+      const [sidebar, setSidebar] = useState(true);
+      const [fullView, setFullView] = useState(false);
+
+      const toggleColor = useCallback((hex) => {
+        setActiveMix(prev => prev.includes(hex) ? prev.filter(c=>c!==hex) : [...prev, hex]);
+      }, []);
+
+      const assignFlower = useCallback((flowerId) => {
+        setAssignments(prev => {
+          const curr = prev[activeTab] || [];
+          if (activeTab === "bouquet" && singleFlower) {
+            if (curr.includes(flowerId)) return { ...prev, [activeTab]: [] };
+            return { ...prev, [activeTab]: [flowerId] };
+          }
+          if (curr.includes(flowerId)) return { ...prev, [activeTab]: curr.filter(f=>f!==flowerId) };
+          return { ...prev, [activeTab]: [...curr, flowerId] };
+        });
+      }, [activeTab, singleFlower]);
+
+      const handleDrop = useCallback((e) => {
+        e.preventDefault();
+        const flowerId = e.dataTransfer.getData("flower");
+        if (flowerId) assignFlower(flowerId);
+      }, [assignFlower]);
+
+      const loadProposal = useCallback((proposal) => {
+        const newAssignments = { aisle:[], altar:[], tables:[], bouquet:[], boutonniere:[], bar:[] };
+        Object.entries(proposal.elements).forEach(([tabId, el]) => {
+          newAssignments[tabId] = el.flowerIds || [];
+        });
+        const allColors = Object.values(proposal.elements).flatMap(el => el.colors);
+        setActiveMix([...new Set(allColors)]);
+        setAssignments(newAssignments);
+      }, []);
+
+      const currentTab = TABS.find(t=>t.id===activeTab);
+
+      return (
+        <div className="min-h-screen" style={{background:"linear-gradient(180deg, #FAF7F2 0%, #F5F0E8 100%)", fontFamily:"'Inter','system-ui',sans-serif"}}>
+
+          {/* ── TOP NAV ── */}
+          <nav className="sticky top-0 z-40 backdrop-blur-md border-b border-stone-200/60" style={{background:"rgba(250,247,242,0.92)"}}>
+            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-lg" style={{background:"linear-gradient(135deg,#F5C451,#E8825A)"}}>☀️</div>
+                <div>
+                  <h1 className="font-bold text-stone-800 text-sm sm:text-base">Solar Rhythm Planner</h1>
+                  <p className="text-xs text-stone-400">Terre Ugo · June 2026</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>setSidebar(!sidebar)} className="sm:hidden text-stone-500 px-2 py-1 rounded-lg hover:bg-stone-100 text-sm">
+                  {sidebar ? "✕" : "☰"}
+                </button>
+                <button
+                  onClick={()=>setShowProposals(!showProposals)}
+                  className="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white transition-all hover:scale-105"
+                  style={{background:"linear-gradient(135deg,#F5C451,#E8825A)"}}
+                >
+                  {showProposals ? "Back to Planner" : "3 Ready Proposals"}
+                </button>
+              </div>
+            </div>
+          </nav>
+
+          {exportProposal && <ExportPanel proposal={exportProposal} onClose={()=>setExportProposal(null)}/>}
+
+          {/* ── PROPOSALS VIEW ── */}
+          {showProposals ? (
+            <div className="max-w-7xl mx-auto px-4 py-6">
+              <div className="mb-6 text-center">
+                <h2 className="text-2xl font-bold text-stone-800 mb-1">3 Ready-to-Show Proposals</h2>
+                <p className="text-stone-500 text-sm">Based on your exact preferences + Sophie's quote (1435€)</p>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {PROPOSALS.map(p => (
+                  <div key={p.id}>
+                    <ProposalView proposal={p}/>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={()=>{ loadProposal(p); setShowProposals(false); }}
+                        className="flex-1 py-2 rounded-xl text-sm font-semibold text-stone-700 bg-white border-2 border-stone-200 hover:border-amber-400 transition-all"
+                      >
+                        Load in Planner
+                      </button>
+                      <button
+                        onClick={()=>setExportProposal(p)}
+                        className="flex-1 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+                        style={{background:"linear-gradient(135deg,#7B68AE,#B0A0C8)"}}
+                      >
+                        Export
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Sophie Quote Summary */}
+              <div className="mt-8 max-w-xl mx-auto bg-white rounded-2xl border-2 border-stone-200 p-5">
+                <h3 className="font-bold text-stone-800 mb-3">Devis Sophie — Fleurissons vos émotions</h3>
+                <div className="space-y-1 text-sm text-stone-600">
+                  <div className="flex justify-between"><span>Bouquet mariée + à jeter + clématites</span><span className="font-semibold">135€</span></div>
+                  <div className="flex justify-between"><span>Boutonnière jaune</span><span className="font-semibold">10€</span></div>
+                  <div className="flex justify-between"><span>Allée cérémonie (6×75€)</span><span className="font-semibold">450€</span></div>
+                  <div className="flex justify-between"><span>Tables dîner (12×45€)</span><span className="font-semibold">540€</span></div>
+                  <div className="flex justify-between"><span>Installation + désinstallation</span><span className="font-semibold">300€</span></div>
+                  <div className="flex justify-between border-t border-stone-200 pt-2 mt-2 text-base"><span className="font-bold">Total</span><span className="font-bold text-amber-600">1 435€</span></div>
+                </div>
+                <div className="mt-3 text-xs text-stone-400">
+                  Acompte 717,50€ avant 1er avril · Solde 717,50€ avant 1er juin
+                </div>
+              </div>
+            </div>
+          ) : (
+
+          /* ── PLANNER VIEW ── */
+          <div className="max-w-7xl mx-auto flex" style={{minHeight:"calc(100vh - 56px)"}}>
+
+            {/* ── LEFT SIDEBAR ── */}
+            <aside className={`${sidebar ? 'block' : 'hidden'} sm:block w-72 flex-shrink-0 border-r border-stone-200/60 p-4 overflow-y-auto`} style={{maxHeight:"calc(100vh - 56px)"}}>
+
+              <div className="mb-5">
+                <h2 className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-1">Extracted Palettes</h2>
+                <div className="flex flex-wrap gap-1">
+                  {PALETTE.map(c => (
+                    <Swatch key={c.id} hex={c.hex} size={32} name={c.name}
+                      onClick={()=>toggleColor(c.hex)} selected={activeMix.includes(c.hex)}/>
+                  ))}
+                </div>
+                {activeMix.length > 0 && (
+                  <div className="mt-2">
+                    <div className="text-xs text-stone-400 mb-1">Active Mix ({activeMix.length})</div>
+                    <div className="flex gap-0.5 h-6 rounded-full overflow-hidden border border-stone-200">
+                      {activeMix.map((c,i) => <div key={i} style={{background:c, flex:1}}/>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-5">
+                <h2 className="font-bold text-stone-700 text-sm mb-1 flex items-center gap-1">Flower Library</h2>
+                <p className="text-xs text-stone-400 mb-2">Click or drag onto a tab</p>
+                <div className="space-y-2">
+                  {FLOWERS.map(f => (
+                    <FlowerCard key={f.id} flower={f} onDrag={assignFlower}
+                      assigned={(assignments[activeTab]||[]).includes(f.id)}/>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <h2 className="font-bold text-stone-700 text-sm mb-2">Toggles</h2>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer">
+                    <input type="checkbox" checked={tropical} onChange={()=>setTropical(!tropical)} className="rounded accent-amber-500"/>
+                    Add subtle tropical touch
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer">
+                    <input type="checkbox" checked={provencal} onChange={()=>setProvencal(!provencal)} className="rounded accent-amber-500"/>
+                    Keep Provençal chic
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer">
+                    <input type="checkbox" checked={true} disabled className="rounded accent-red-500"/>
+                    <span className="text-red-500">Avoid boho / rococo / pastel</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <h2 className="font-bold text-stone-700 text-sm mb-1">Vibe</h2>
+                <div className="flex flex-wrap gap-1">
+                  {VIBE_KEYWORDS.map(v => (
+                    <span key={v} className="text-xs px-2 py-1 rounded-full bg-stone-100 text-stone-500">{v}</span>
+                  ))}
+                </div>
+              </div>
+            </aside>
+
+            {/* ── MAIN AREA ── */}
+            <main className="flex-1 min-w-0">
+
+              {/* Tab bar */}
+              <div className="flex overflow-x-auto border-b border-stone-200/60 px-2">
+                {TABS.map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={()=>{ setActiveTab(tab.id); setFullView(false); }}
+                    className={`flex items-center gap-1.5 px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-all ${
+                      activeTab === tab.id && !fullView
+                        ? 'border-amber-500 text-stone-800 font-semibold'
+                        : 'border-transparent text-stone-400 hover:text-stone-600'
+                    }`}
+                  >
+                    <span>{tab.icon}</span>
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </button>
+                ))}
+                <button
+                  onClick={()=>setFullView(!fullView)}
+                  className={`flex items-center gap-1.5 px-4 py-3 text-sm whitespace-nowrap border-b-2 transition-all ml-auto ${
+                    fullView ? 'border-purple-500 text-stone-800 font-semibold' : 'border-transparent text-stone-400 hover:text-stone-600'
+                  }`}
+                >
+                  <span className="hidden sm:inline">Full Wedding View</span>
+                  <span className="sm:hidden">All</span>
+                </button>
+              </div>
+
+              {/* Content area */}
+              <div className="p-4 sm:p-6">
+
+                {fullView ? (
+                  /* Full Wedding View */
+                  <div className="space-y-4">
+                    <h2 className="text-xl font-bold text-stone-800 mb-2">Full Wedding View</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {TABS.map(tab => (
+                        <div key={tab.id}>
+                          <Preview tab={tab} assignments={assignments} activeMix={activeMix}/>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  /* Single tab view */
+                  <div
+                    onDragOver={(e)=>{e.preventDefault(); e.dataTransfer.dropEffect="copy";}}
+                    onDrop={handleDrop}
+                  >
+                    {/* Bouquet special controls */}
+                    {activeTab === "bouquet" && (
+                      <div className="bg-white rounded-xl border border-stone-200 p-4 mb-4">
+                        <h3 className="font-semibold text-stone-700 text-sm mb-2">Bouquet Rules</h3>
+                        <div className="flex flex-wrap gap-4">
+                          <label className="flex items-center gap-2 text-sm text-stone-600 cursor-pointer">
+                            <input type="checkbox" checked={singleFlower} onChange={()=>setSingleFlower(!singleFlower)} className="accent-amber-500"/>
+                            Single flower type only
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-stone-600 cursor-pointer">
+                            <input type="checkbox" checked={monochrome} onChange={()=>setMonochrome(!monochrome)} className="accent-amber-500"/>
+                            Monochrome (white)
+                          </label>
+                        </div>
+                        <p className="text-xs text-stone-400 mt-2">Ruban mousseline de soie blanc · Pas de feuillage · Ajouter clématites trailing</p>
+                      </div>
+                    )}
+
+                    {/* Boutonnière auto-suggest */}
+                    {activeTab === "boutonniere" && (
+                      <div className="bg-blue-50 rounded-xl border border-blue-200 p-4 mb-4">
+                        <h3 className="font-semibold text-stone-700 text-sm mb-1">Auto-suggestion: Petrol Blue Contrast</h3>
+                        <p className="text-xs text-stone-500 mb-2">Le costume est bleu pétrole — jaune totalement (note Sophie). Options qui matchent :</p>
+                        <div className="flex gap-2 flex-wrap">
+                          {["craspedia","achillea","ranunculus"].map(fId => {
+                            const f = FLOWERS.find(fl=>fl.id===fId);
+                            return f ? (
+                              <button key={fId} onClick={()=>assignFlower(fId)}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs border transition-all ${
+                                  (assignments.boutonniere||[]).includes(fId) ? 'bg-amber-100 border-amber-400 font-semibold' : 'bg-white border-stone-200 hover:border-amber-300'
+                                }`}>
+                                <FlowerImg flowerId={fId} size={28}/>
+                                {f.name}
+                              </button>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Assigned flowers */}
+                    {(assignments[activeTab]||[]).length > 0 && (
+                      <div className="mb-4">
+                        <div className="text-xs text-stone-400 mb-1">Assigned flowers (click to remove):</div>
+                        <div className="flex flex-wrap gap-2">
+                          {(assignments[activeTab]||[]).map((fId,i) => {
+                            const f = FLOWERS.find(fl=>fl.id===fId);
+                            return f ? (
+                              <button key={`${fId}-${i}`} onClick={()=>assignFlower(fId)}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs bg-amber-50 border border-amber-300 hover:bg-red-50 hover:border-red-300 transition-all">
+                                <FlowerImg flowerId={fId} size={24}/>
+                                {f.name} ✕
+                              </button>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <Preview tab={currentTab} assignments={assignments} activeMix={activeMix}/>
+                  </div>
+                )}
+              </div>
+            </main>
+          </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SolarRhythmFloralPlanner));
+  </script>
+</body>
+</html>
